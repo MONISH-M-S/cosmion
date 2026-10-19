@@ -28,6 +28,7 @@ Speaker ◀──WebRTC── LiveKit room ◀───────────�
 - **British neural voice** — `en_GB-alan-medium` by default, tuned slightly slower.
 - **Typed configuration** — one `.env.local`, validated at startup with clear errors.
 - **Preflight + smoke tests** — verify Ollama, the voice model, and audio output before a call.
+- **Warm first turn** — cached models load during prewarm; cold loads run in worker threads.
 - **No secrets in git** — `.env.local`, voice models, and caches are ignored.
 
 ## Requirements
@@ -37,7 +38,7 @@ Speaker ◀──WebRTC── LiveKit room ◀───────────�
 | Python | 3.10–3.13 (3.13 recommended) |
 | [Ollama](https://ollama.com/download) | Local LLM runtime; default model `llama3.2` (~2 GB) |
 | [LiveKit Cloud](https://cloud.livekit.io/) | Free tier is enough, or self-host LiveKit |
-| Disk | ~1 GB for dependencies, ~60 MB for the voice model |
+| Disk | ~1 GB dependencies, ~60 MB voice model, ~2 GB Ollama model, ~500 MB Whisper model |
 | Hardware | CPU is fine; a CUDA GPU speeds up Whisper |
 
 ## Quickstart (Windows / PowerShell)
@@ -64,6 +65,12 @@ python -m cosmion dev
 Then open the [LiveKit Agents Playground](https://agents-playground.livekit.io/),
 enter the same LiveKit URL/key/secret, and connect. Allow microphone access and say
 "Hello, COSMION."
+
+On first run, faster-whisper downloads the `small` model (~500 MB) once. It is
+cached in `%USERPROFILE%\.cache\huggingface` on Windows or `~/.cache/huggingface`
+elsewhere. Piper is preloaded during the worker's prewarm phase, and Whisper is
+prewarmed on later runs once cached. On the very first run, the download and ONNX
+initialization happen in a worker thread instead of blocking the conversation loop.
 
 ### Quickstart (macOS / Linux)
 
@@ -143,6 +150,7 @@ it straightforward to swap in another local engine or a cloud voice plugin.
 | `python scripts/preflight.py` | Checks Python, packages, env vars, voice files, and Ollama |
 | `python scripts/download_voice.py` | Downloads the default Piper voice |
 | `python scripts/smoke_tts.py "Hello, sir."` | Renders speech to `artifacts/cosmion-smoke.wav` |
+| `python scripts/live_e2e.py` | Speaks a test question into a real room, records the reply, and transcribes it |
 | `python -m cosmion dev` | Starts the worker with auto-reload |
 | `python -m cosmion start` | Starts the worker for production |
 | `pytest -m "not slow"` | Runs unit tests |
@@ -163,6 +171,7 @@ cosmion_livekit/
 │   └── __main__.py     # `python -m cosmion`
 ├── scripts/
 │   ├── download_voice.py
+│   ├── live_e2e.py
 │   ├── preflight.py
 │   └── smoke_tts.py
 ├── tests/
@@ -188,6 +197,7 @@ cosmion_livekit/
 | `Ollama is not reachable` | Start Ollama, then run `ollama pull llama3.2` |
 | `Ollama model 'llama3.2' is not installed` | Run `ollama pull llama3.2` |
 | LiveKit connects but no audio | Check microphone permissions in the playground/browser |
+| `live_e2e.py` waits forever for COSMION | Start `python -m cosmion dev` in another terminal first |
 | Whisper is slow | Use `WHISPER_MODEL=base` or a CUDA GPU |
 | `No module named 'cosmion'` | Activate the venv and run `pip install -e .` |
 | Python 3.14 install errors | Use Python 3.13; some native wheels lag behind |

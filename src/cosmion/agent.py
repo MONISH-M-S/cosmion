@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 from livekit.agents import (
     Agent,
@@ -13,16 +14,16 @@ from livekit.agents import (
     AutoSubscribe,
     JobContext,
     JobProcess,
-    RoomInputOptions,
+    SessionUsageUpdatedEvent,
     WorkerOptions,
     cli,
-    metrics,
 )
+from livekit.agents.voice.room_io import RoomOptions
 from livekit.plugins import openai, silero
 
 from .config import ConfigError, Settings, load_settings
-from .stt import WhisperSTT
-from .tts import PiperTTS
+from .stt import WhisperSTT, preload_whisper_model
+from .tts import PiperTTS, preload_piper_voice
 
 logger = logging.getLogger("cosmion")
 
@@ -48,22 +49,20 @@ class Cosmion(Agent):
         )
 
 
-def _build_session(settings: Settings, vad: silero.VAD) -> AgentSession:
-    return AgentSession(
-        vad=vad,
-        stt=WhisperSTT(
+async def _build_session(settings: Settings, vad: silero.VAD) -> AgentSession:
+    # Creating the plugins can touch ONNX Runtime or the Hugging Face cache.
+    # Build them off the event loop so a cold or slow model never freezes
+    # audio handling. Both calls are cache hits when prewarm succeeded.
+    stt_plugin, tts_plugin = await asyncio.gather(
+        asyncio.to_thread(
+            WhisperSTT,
             model=settings.whisper_model,
             language=settings.whisper_language,
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
         ),
-        llm=openai.LLM(
-            model=settings.ollama_model,
-            base_url=settings.ollama_base_url,
-            api_key="ollama",  # required by the client, ignored by Ollama
-            temperature=settings.ollama_temperature,
-        ),
-        tts=PiperTTS(
+        asyncio.to_thread(
+            PiperTTS,
             settings.piper_model_path,
             speed=settings.piper_speed,
             volume=settings.piper_volume,
@@ -71,6 +70,18 @@ def _build_session(settings: Settings, vad: silero.VAD) -> AgentSession:
             noise_w=settings.piper_noise_w,
             use_cuda=settings.piper_use_cuda,
         ),
+    )
+
+    return AgentSession(
+        vad=vad,
+        stt=stt_plugin,
+        llm=openai.LLM(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            api_key="ollama",  # required by the client, ignored by Ollama
+            temperature=settings.ollama_temperature,
+        ),
+        tts=tts_plugin,
         turn_handling={
             "endpointing": {"min_delay": 0.5, "max_delay": 5.0},
         },
@@ -107,6 +118,35 @@ def _check_ollama(settings: Settings) -> None:
 def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
+    # Load cached models before the event loop starts so the first greeting is
+    # not delayed. Whisper is only preloaded from the local cache: a first-run
+    # download can take minutes and would exceed JobProcess's init timeout.
+    # When it is not cached, entrypoint loads it off-loop instead.
+    settings = load_settings()
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="cosmion-prewarm") as pool:
+        whisper = pool.submit(
+            preload_whisper_model,
+            settings.whisper_model,
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            local_files_only=True,
+        )
+        piper = pool.submit(
+            preload_piper_voice,
+            settings.piper_model_path,
+            use_cuda=settings.piper_use_cuda,
+        )
+
+        try:
+            whisper.result()
+        except Exception as exc:
+            logger.info(
+                "Whisper model is not cached yet; it will download on the first "
+                "conversation (%s).",
+                exc,
+            )
+        piper.result()
+
 
 async def entrypoint(ctx: JobContext) -> None:
     settings = load_settings()
@@ -124,16 +164,19 @@ async def entrypoint(ctx: JobContext) -> None:
     participant = await ctx.wait_for_participant()
     logger.info("COSMION online for participant %s", participant.identity)
 
-    usage_collector = metrics.UsageCollector()
+    latest_usage: list[object] = []
 
-    def on_metrics_collected(agent_metrics: metrics.AgentMetrics) -> None:
-        metrics.log_metrics(agent_metrics)
-        usage_collector.collect(agent_metrics)
+    def on_usage_updated(event: SessionUsageUpdatedEvent) -> None:
+        # This event fires on every metric update; keep the latest snapshot and
+        # log it once when the session ends instead of repeating it each turn.
+        latest_usage[:] = event.usage.model_usage
 
-    session = _build_session(settings, ctx.proc.userdata["vad"])
-    session.on("metrics_collected", on_metrics_collected)
+    session = await _build_session(settings, ctx.proc.userdata["vad"])
+    session.on("session_usage_updated", on_usage_updated)
 
     async def _on_shutdown() -> None:
+        if latest_usage:
+            logger.info("Session usage: %s", latest_usage)
         logger.info("COSMION shutting down")
 
     ctx.add_shutdown_callback(_on_shutdown)
@@ -141,7 +184,7 @@ async def entrypoint(ctx: JobContext) -> None:
     await session.start(
         room=ctx.room,
         agent=Cosmion(),
-        room_input_options=RoomInputOptions(),
+        room_options=RoomOptions(),
     )
 
 
@@ -155,6 +198,9 @@ def main() -> None:
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
+            # Loading two local ONNX models can take longer than the 10s
+            # default on cold disks; give the first job room to initialize.
+            initialize_process_timeout=30.0,
         )
     )
 

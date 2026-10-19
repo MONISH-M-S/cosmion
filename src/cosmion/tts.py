@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,10 @@ from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 from piper import PiperVoice, SynthesisConfig
 
 logger = logging.getLogger(__name__)
+
+_VOICE_CACHE: dict[tuple[str, bool], PiperVoice] = {}
+_VOICE_CACHE_LOCK = threading.Lock()
+_SYNTHESIS_LOCK = threading.Lock()
 
 
 def _downmix_chunk(chunk: Any) -> bytes:
@@ -47,6 +52,26 @@ def _resolve_sample_rate(voice: PiperVoice, model_path: Path) -> int:
         ) from exc
 
 
+def preload_piper_voice(model_path: str | Path, *, use_cuda: bool = False) -> PiperVoice:
+    """Load and cache a Piper voice once per process.
+
+    Loading the ONNX session takes several seconds. Doing it in LiveKit's
+    ``prewarm`` hook keeps that work off the conversation event loop.
+    """
+    path = Path(model_path).expanduser().resolve()
+    key = (str(path), use_cuda)
+    with _VOICE_CACHE_LOCK:
+        cached = _VOICE_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+        logger.info("Loading Piper voice %s (use_cuda=%s)", path.name, use_cuda)
+        voice = PiperVoice.load(str(path), use_cuda=use_cuda)
+        _VOICE_CACHE[key] = voice
+        logger.info("Piper voice loaded")
+        return voice
+
+
 class PiperTTS(tts.TTS):
     """A LiveKit TTS plugin that speaks through a local Piper voice.
 
@@ -70,7 +95,7 @@ class PiperTTS(tts.TTS):
             raise FileNotFoundError(f"Piper voice model not found: {path}")
 
         self._model_path = path
-        self._voice = PiperVoice.load(str(path), use_cuda=use_cuda)
+        self._voice = preload_piper_voice(path, use_cuda=use_cuda)
         self._sample_rate = _resolve_sample_rate(self._voice, path)
         self._speed = speed
         self._volume = volume
@@ -129,8 +154,12 @@ class _PiperChunkedStream(tts.ChunkedStream):
 
         def produce() -> None:
             try:
-                for chunk in self._tts.voice.synthesize(text, syn_config=config):
-                    loop.call_soon_threadsafe(queue.put_nowait, _downmix_chunk(chunk))
+                # A prewarmed voice can be shared by sequential jobs in the
+                # same process; serialize synthesis so it is never used twice
+                # at once.
+                with _SYNTHESIS_LOCK:
+                    for chunk in self._tts.voice.synthesize(text, syn_config=config):
+                        loop.call_soon_threadsafe(queue.put_nowait, _downmix_chunk(chunk))
             except BaseException as exc:  # propagate synthesis failures
                 loop.call_soon_threadsafe(queue.put_nowait, exc)
             finally:

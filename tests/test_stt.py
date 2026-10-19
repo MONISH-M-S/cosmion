@@ -27,6 +27,12 @@ def test_decode_wav_returns_exactly_the_audio_samples() -> None:
     assert np.max(np.abs(decoded)) < 0.2
 
 
+def test_decode_wav_resamples_to_16khz_for_whisper() -> None:
+    decoded = decode_wav(_wav_bytes(seconds=1.0, sample_rate=24000))
+    assert decoded.dtype == np.float32
+    assert decoded.shape == (16000,)
+
+
 def test_decode_wav_downmixes_stereo() -> None:
     left = np.full(1600, 0.5, dtype=np.float32)
     right = np.full(1600, -0.5, dtype=np.float32)

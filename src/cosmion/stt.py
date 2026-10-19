@@ -20,6 +20,10 @@ from livekit.agents.utils import AudioBuffer
 
 logger = logging.getLogger(__name__)
 
+_MODEL_CACHE: dict[tuple[str, str, str, str | None], WhisperModel] = {}
+_MODEL_CACHE_LOCK = threading.Lock()
+_TRANSCRIBE_LOCK = threading.Lock()
+
 WhisperModelName = Literal[
     "tiny",
     "base",
@@ -43,20 +47,36 @@ class WhisperOptions:
     beam_size: int = 1
 
 
+def _resample_to_whisper_rate(audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    """Resample mono float32 audio to the 16 kHz rate Whisper expects."""
+    target_rate = 16000
+    if sample_rate == target_rate or audio.size == 0:
+        return audio.astype(np.float32, copy=False)
+
+    target_size = max(1, int(round(audio.size * target_rate / sample_rate)))
+    source_positions = np.arange(audio.size, dtype=np.float64)
+    target_positions = np.linspace(0.0, audio.size - 1.0, target_size)
+    return np.interp(target_positions, source_positions, audio).astype(np.float32)
+
+
 def decode_wav(wav_bytes: bytes) -> np.ndarray:
-    """Decode WAV bytes into mono float32 PCM.
+    """Decode WAV bytes into mono float32 PCM at Whisper's 16 kHz rate.
 
     ``AudioFrame.to_wav_bytes()`` returns a complete WAV file, including its
     RIFF header. Treating those bytes as raw PCM feeds the header into Whisper
     as audio, so we decode the file properly with soundfile instead.
+
+    LiveKit may deliver 24 kHz or 48 kHz frames. Whisper always interprets a
+    float32 array as 16 kHz, so resampling here prevents faster, pitched-up
+    speech and the accuracy loss that comes with it.
     """
     if not wav_bytes:
         raise ValueError("Received an empty WAV payload from LiveKit.")
 
     audio, sample_rate = sf.read(io.BytesIO(wav_bytes), dtype="float32", always_2d=True)
     if sample_rate != 16000:
-        logger.warning("Expected 16 kHz audio from LiveKit, received %d Hz", sample_rate)
-    return audio.mean(axis=1)
+        logger.debug("Resampling STT audio from %d Hz to 16000 Hz", sample_rate)
+    return _resample_to_whisper_rate(audio.mean(axis=1), sample_rate)
 
 
 def transcribe(
@@ -67,18 +87,64 @@ def transcribe(
     beam_size: int = 1,
 ) -> str:
     """Run a single transcription and return the joined text."""
-    segments, _info = model.transcribe(
-        audio,
-        language=language,
-        beam_size=beam_size,
-        best_of=1,
-        # Short, command-style utterances are safer without cross-utterance
-        # context, which can otherwise cause repetition and hallucination.
-        condition_on_previous_text=False,
-        # Silero VAD has already segmented the turn; double filtering is wasteful.
-        vad_filter=False,
-    )
-    return " ".join(segment.text.strip() for segment in segments).strip()
+    # A model can be shared by warm job threads; CTranslate2 inference is
+    # serialized so concurrent sessions cannot race inside one model.
+    with _TRANSCRIBE_LOCK:
+        segments, _info = model.transcribe(
+            audio,
+            language=language,
+            beam_size=beam_size,
+            best_of=1,
+            # Short, command-style utterances are safer without cross-utterance
+            # context, which can otherwise cause repetition and hallucination.
+            condition_on_previous_text=False,
+            # Silero VAD has already segmented the turn; double filtering is wasteful.
+            vad_filter=False,
+        )
+        return " ".join(segment.text.strip() for segment in segments).strip()
+
+
+def preload_whisper_model(
+    model: str,
+    device: str = "cpu",
+    compute_type: str = "int8",
+    model_cache_directory: str | None = None,
+    *,
+    local_files_only: bool = False,
+) -> WhisperModel:
+    """Load a Whisper model once per process.
+
+    LiveKit's worker prewarms each job process before the event loop starts.
+    ``prewarm`` calls this with ``local_files_only=True`` so cached models are
+    ready before the first greeting. If the model is missing, the caller loads
+    it in a worker thread instead, keeping downloads off the event loop.
+    """
+    key = (str(model), device, compute_type, model_cache_directory)
+    with _MODEL_CACHE_LOCK:
+        cached = _MODEL_CACHE.get(key)
+        if cached is not None:
+            return cached
+
+        cache_dir = model_cache_directory
+        if cache_dir:
+            os.makedirs(cache_dir, exist_ok=True)
+
+        logger.info(
+            "Loading Whisper model %r (device=%s, compute_type=%s)",
+            model,
+            device,
+            compute_type,
+        )
+        loaded = WhisperModel(
+            model_size_or_path=str(model),
+            device=device,
+            compute_type=compute_type,
+            download_root=cache_dir,
+            local_files_only=local_files_only,
+        )
+        _MODEL_CACHE[key] = loaded
+        logger.info("Whisper model loaded")
+        return loaded
 
 
 class WhisperSTT(stt.STT):
@@ -110,24 +176,12 @@ class WhisperSTT(stt.STT):
             self._warmup(warmup_audio)
 
     def _load_model(self) -> WhisperModel:
-        cache_dir = self._opts.model_cache_directory
-        if cache_dir:
-            os.makedirs(cache_dir, exist_ok=True)
-
-        logger.info(
-            "Loading Whisper model %r (device=%s, compute_type=%s)",
+        return preload_whisper_model(
             self._opts.model,
-            self._opts.device,
-            self._opts.compute_type,
-        )
-        model = WhisperModel(
-            model_size_or_path=self._opts.model,
             device=self._opts.device,
             compute_type=self._opts.compute_type,
-            download_root=cache_dir,
+            model_cache_directory=self._opts.model_cache_directory,
         )
-        logger.info("Whisper model loaded")
-        return model
 
     def _warmup(self, path: str) -> None:
         try:
