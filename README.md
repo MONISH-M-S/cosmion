@@ -24,7 +24,8 @@ Speaker ◀──WebRTC── LiveKit room ◀───────────�
 ## Features
 
 - **Fully local AI pipeline** — STT, LLM, TTS, and VAD all run on your hardware.
-- **JARVIS persona** — addresses you as "sir", speaks calmly, and keeps replies short.
+- **JARVIS persona** — calm, concise, occasionally addresses you as "sir", and names
+  **Monish M S** as its creator.
 - **British neural voice** — `en_GB-alan-medium` by default, tuned slightly slower.
 - **Typed configuration** — one `.env.local`, validated at startup with clear errors.
 - **Preflight + smoke tests** — verify Ollama, the voice model, and audio output before a call.
@@ -78,6 +79,12 @@ cached in `%USERPROFILE%\.cache\huggingface` on Windows or `~/.cache/huggingface
 elsewhere. Piper is preloaded during the worker's prewarm phase, and Whisper is
 prewarmed on later runs once cached. On the very first run, the download and ONNX
 initialization happen in a worker thread instead of blocking the conversation loop.
+
+> **Using someone else's copy?** The repository ships no credentials. Create your own
+> free [LiveKit Cloud](https://cloud.livekit.io/) project, copy its WebSocket URL,
+> API key, and API secret into `.env.local`, then follow the same steps. Speech
+> recognition, the language model, and the voice all run on your own machine, so
+> there are no per-minute AI API bills.
 
 ### Quickstart (macOS / Linux)
 
