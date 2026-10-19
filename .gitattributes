@@ -1,8 +1,12 @@
 * text=auto eol=lf
 
+# Windows launchers need CRLF in the working tree.
+*.bat text eol=crlf
+
 *.onnx binary
 *.wav binary
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.gif binary
+*.ico binary

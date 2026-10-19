@@ -161,7 +161,12 @@ async def entrypoint(ctx: JobContext) -> None:
 
     logger.info("Connecting to room %s", ctx.room.name)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    participant = await ctx.wait_for_participant()
+    try:
+        participant = await ctx.wait_for_participant()
+    except RuntimeError as exc:
+        # The user closed the page or denied microphone access before joining.
+        logger.info("Participant never joined; ending the job (%s)", exc)
+        return
     logger.info("COSMION online for participant %s", participant.identity)
 
     latest_usage: list[object] = []

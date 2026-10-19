@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>COSMION</title>
+  <link rel="icon" href="/cosmion.ico">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-mode="idle">
+  <main class="shell">
+    <header class="brand">
+      <p class="eyebrow">LOCAL VOICE ASSISTANT</p>
+      <h1>C.O.S.M.I.O.N</h1>
+      <p class="tagline">Local intelligence. Spoken naturally.</p>
+    </header>
+
+    <section class="orb-stage" aria-hidden="true">
+      <div class="orb-ring orb-ring-one"></div>
+      <div class="orb-ring orb-ring-two"></div>
+      <div class="orb">
+        <span class="orb-core"></span>
+        <span class="orb-glint"></span>
+      </div>
+    </section>
+
+    <section class="status" aria-live="polite">
+      <h2 id="status-title">Ready</h2>
+      <p id="status-detail">Start a conversation and speak naturally.</p>
+    </section>
+
+    <div class="controls">
+      <button id="start-btn" class="primary" type="button">Start Conversation</button>
+      <button id="enable-audio-btn" class="secondary" type="button" hidden>Enable Audio</button>
+      <button id="mute-btn" class="secondary" type="button" hidden>Mute</button>
+      <button id="end-btn" class="secondary" type="button" hidden>End</button>
+    </div>
+
+    <footer class="footer">
+      <span class="privacy"><span class="dot"></span>All AI processing stays on this machine.</span>
+      <button id="quit-btn" class="link" type="button">Quit COSMION</button>
+    </footer>
+  </main>
+
+  <div id="audio-container" hidden></div>
+
+  <script src="/vendor/livekit-client.umd.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

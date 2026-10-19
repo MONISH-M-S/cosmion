@@ -29,6 +29,8 @@ Speaker ◀──WebRTC── LiveKit room ◀───────────�
 - **Typed configuration** — one `.env.local`, validated at startup with clear errors.
 - **Preflight + smoke tests** — verify Ollama, the voice model, and audio output before a call.
 - **Warm first turn** — cached models load during prewarm; cold loads run in worker threads.
+- **One-click launcher** — `Start COSMION.bat` starts the worker and opens a local
+  page with a built-in **Start Conversation** button.
 - **No secrets in git** — `.env.local`, voice models, and caches are ignored.
 
 ## Requirements
@@ -59,12 +61,17 @@ ollama pull llama3.2
 
 python scripts/preflight.py
 python scripts/smoke_tts.py
-python -m cosmion dev
 ```
 
-Then open the [LiveKit Agents Playground](https://agents-playground.livekit.io/),
-enter the same LiveKit URL/key/secret, and connect. Allow microphone access and say
-"Hello, COSMION."
+That is the whole setup. From then on, start COSMION by double-clicking
+**`Start COSMION.bat`** (or a desktop shortcut to it). The launcher starts the
+worker and opens **http://127.0.0.1:8765/** in your browser. Click
+**Start Conversation**, allow microphone access once, and talk.
+
+If you prefer the generic LiveKit playground, start the worker with
+`python -m cosmion dev` and open the
+[LiveKit Agents Playground](https://agents-playground.livekit.io/) instead. Paste
+the same LiveKit URL/key/secret and connect.
 
 On first run, faster-whisper downloads the `small` model (~500 MB) once. It is
 cached in `%USERPROFILE%\.cache\huggingface` on Windows or `~/.cache/huggingface`
@@ -89,8 +96,33 @@ ollama pull llama3.2
 
 python scripts/preflight.py
 python scripts/smoke_tts.py
-python -m cosmion dev
+python scripts/one_click.py
 ```
+
+On macOS and Linux the launcher opens the same local page at
+`http://127.0.0.1:8765/`. To run only the worker instead, use
+`python -m cosmion dev` and connect through the LiveKit playground.
+
+## One-click launcher
+
+`Start COSMION.bat` (Windows) and `python scripts/one_click.py` (any platform) do
+three things:
+
+1. Start the COSMION worker as a child process, logging to
+   `artifacts/one-click-worker.log`.
+2. Serve a small local web app on **127.0.0.1 only**. The page asks the launcher
+   for a short-lived room token; your LiveKit API secret never reaches the browser.
+3. Open the page in your default browser.
+
+The page has one primary action: **Start Conversation**. It connects to a fresh
+room, enables your microphone, and plays COSMION's reply. Allow microphone access the
+first time; after that it is a single click. Use **Mute**, **End**, or
+**Quit COSMION** to control the session.
+
+Each conversation uses a new random room, so you can start again without restarting
+the launcher. Starting the launcher a second time just reopens the existing page
+instead of spawning a duplicate worker. On Windows, the worker is tied to a job
+object, so it is cleaned up even if the launcher window is closed abruptly.
 
 ## Configuration
 
@@ -151,6 +183,8 @@ it straightforward to swap in another local engine or a cloud voice plugin.
 | `python scripts/download_voice.py` | Downloads the default Piper voice |
 | `python scripts/smoke_tts.py "Hello, sir."` | Renders speech to `artifacts/cosmion-smoke.wav` |
 | `python scripts/live_e2e.py` | Speaks a test question into a real room, records the reply, and transcribes it |
+| `python scripts/one_click.py` | Starts the worker and the local web UI, then opens the browser |
+| `Start COSMION.bat` | Windows double-click launcher for `one_click.py` |
 | `python -m cosmion dev` | Starts the worker with auto-reload |
 | `python -m cosmion start` | Starts the worker for production |
 | `pytest -m "not slow"` | Runs unit tests |
@@ -172,11 +206,19 @@ cosmion_livekit/
 ├── scripts/
 │   ├── download_voice.py
 │   ├── live_e2e.py
+│   ├── one_click.py       # Local launcher + token server
 │   ├── preflight.py
 │   └── smoke_tts.py
+├── web/                   # One-click UI (served from 127.0.0.1)
+│   ├── app.js
+│   ├── cosmion.ico
+│   ├── index.html
+│   ├── style.css
+│   └── vendor/            # Pinned LiveKit JS client (Apache-2.0)
 ├── tests/
-├── models/             # Voice files (gitignored)
-└── .env.local          # Secrets (gitignored)
+├── Start COSMION.bat      # Windows double-click launcher
+├── models/                # Voice files (gitignored)
+└── .env.local             # Secrets (gitignored)
 ```
 
 ## Security
@@ -187,6 +229,10 @@ cosmion_livekit/
   dashboard before using this project.
 - LiveKit Cloud relays encrypted WebRTC media. All AI inference stays local. For a
   fully local network path, self-host LiveKit as well.
+- The one-click launcher binds to `127.0.0.1` only and mints room tokens in-process.
+  Your LiveKit API secret is never sent to the browser; only a short-lived,
+  room-scoped token is. The token endpoint requires a same-origin request header so
+  other local pages cannot silently mint tokens.
 
 ## Troubleshooting
 
@@ -197,6 +243,9 @@ cosmion_livekit/
 | `Ollama is not reachable` | Start Ollama, then run `ollama pull llama3.2` |
 | `Ollama model 'llama3.2' is not installed` | Run `ollama pull llama3.2` |
 | LiveKit connects but no audio | Check microphone permissions in the playground/browser |
+| Local page says "Waiting for COSMION" | The worker is still starting or crashed; check `artifacts/one-click-worker.log` |
+| "Port 8765 is already in use" | Another app owns the port; pass `--port 8766` to `one_click.py` |
+| One-click page does not open | Open `http://127.0.0.1:8765/` manually or run `one_click.py --no-browser` |
 | `live_e2e.py` waits forever for COSMION | Start `python -m cosmion dev` in another terminal first |
 | Whisper is slow | Use `WHISPER_MODEL=base` or a CUDA GPU |
 | `No module named 'cosmion'` | Activate the venv and run `pip install -e .` |
@@ -211,6 +260,8 @@ cosmion_livekit/
 - [Silero VAD](https://github.com/snakers4/silero-vad) — voice activity detection
 - STT plugin originally inspired by [taresh18/livekit-whisper](https://github.com/taresh18/livekit-whisper)
 - Piper plugin originally inspired by [nay-cat/LiveKit-PiperTTS-Plugin](https://github.com/nay-cat/LiveKit-PiperTTS-Plugin)
+- [LiveKit JavaScript client](https://github.com/livekit/client-sdk-js) — vendored in
+  `web/vendor/` under Apache-2.0 (see `web/vendor/LIVEKIT_LICENSE`)
 
 ## License
 
