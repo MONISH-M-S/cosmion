@@ -1,0 +1,30 @@
+# Secrets — never commit real credentials
+.env
+.env.*
+!.env.example
+
+# Piper voice models (download with scripts/download_voice.py)
+models/*
+!models/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated audio
+artifacts/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

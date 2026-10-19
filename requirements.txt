@@ -1,0 +1,3 @@
+# Convenience wrapper. Project metadata and dependencies live in pyproject.toml.
+# Usage: pip install -r requirements.txt
+-e .

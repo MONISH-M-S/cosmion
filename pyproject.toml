@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cosmion"
+version = "0.1.0"
+description = "COSMION — a fully local, JARVIS-style voice assistant built on LiveKit Agents."
+readme = "README.md"
+requires-python = ">=3.10,<3.15"
+license = { text = "MIT" }
+authors = [{ name = "Monish M S", email = "m.s.monish291207@gmail.com" }]
+keywords = [
+  "livekit",
+  "voice-assistant",
+  "whisper",
+  "piper",
+  "ollama",
+  "jarvis",
+  "local-ai",
+  "speech",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
+dependencies = [
+  "livekit-agents[openai,silero]>=1.8,<2",
+  "python-dotenv>=1.0",
+  "faster-whisper>=1.2",
+  "soundfile>=0.14",
+  "numpy>=1.26",
+  "piper-tts>=1.8",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "ruff>=0.9",
+]
+
+[project.scripts]
+cosmion = "cosmion.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+  "slow: end-to-end tests that require the real Piper voice model",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+exclude = [".venv", "models", "artifacts"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4", "PIE"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
