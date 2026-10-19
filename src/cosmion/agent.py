@@ -67,9 +67,13 @@ def _build_session(settings: Settings, vad: silero.VAD) -> AgentSession:
             settings.piper_model_path,
             speed=settings.piper_speed,
             volume=settings.piper_volume,
+            noise_scale=settings.piper_noise_scale,
+            noise_w=settings.piper_noise_w,
+            use_cuda=settings.piper_use_cuda,
         ),
-        min_endpointing_delay=0.5,
-        max_endpointing_delay=5.0,
+        turn_handling={
+            "endpointing": {"min_delay": 0.5, "max_delay": 5.0},
+        },
     )
 
 

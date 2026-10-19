@@ -44,6 +44,18 @@ def _number(env: Mapping[str, str], key: str, default: float) -> float:
         raise ConfigError(f"{key} must be a number (got {raw!r}).") from exc
 
 
+def _boolean(env: Mapping[str, str], key: str, default: bool) -> bool:
+    raw = env.get(key)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigError(f"{key} must be true or false (got {raw!r}).")
+
+
 def _resolve_path(value: str) -> Path:
     path = Path(value).expanduser()
     return path if path.is_absolute() else (PROJECT_ROOT / path).resolve()
@@ -66,6 +78,9 @@ class Settings:
     piper_model_path: Path
     piper_speed: float
     piper_volume: float
+    piper_noise_scale: float
+    piper_noise_w: float
+    piper_use_cuda: bool
     log_level: str
 
     def __post_init__(self) -> None:
@@ -77,6 +92,10 @@ class Settings:
             raise ConfigError("PIPER_SPEED must be greater than 0.0.")
         if not 0.0 < self.piper_volume <= 1.0:
             raise ConfigError("PIPER_VOLUME must be between 0.0 (exclusive) and 1.0.")
+        if not 0.0 <= self.piper_noise_scale <= 1.0:
+            raise ConfigError("PIPER_NOISE_SCALE must be between 0.0 and 1.0.")
+        if not 0.0 <= self.piper_noise_w <= 1.0:
+            raise ConfigError("PIPER_NOISE_W must be between 0.0 and 1.0.")
         if self.log_level not in VALID_LOG_LEVELS:
             allowed = ", ".join(sorted(VALID_LOG_LEVELS))
             raise ConfigError(f"LOG_LEVEL must be one of: {allowed}.")
@@ -123,5 +142,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         ),
         piper_speed=_number(env, "PIPER_SPEED", 0.95),
         piper_volume=_number(env, "PIPER_VOLUME", 1.0),
+        piper_noise_scale=_number(env, "PIPER_NOISE_SCALE", 0.667),
+        piper_noise_w=_number(env, "PIPER_NOISE_W", 0.8),
+        piper_use_cuda=_boolean(env, "PIPER_USE_CUDA", False),
         log_level=_text(env, "LOG_LEVEL", "INFO").upper(),
     )

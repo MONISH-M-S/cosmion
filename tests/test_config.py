@@ -25,6 +25,9 @@ def test_defaults_are_local_first() -> None:
     assert settings.piper_model_path == (PROJECT_ROOT / "models/en_GB-alan-medium.onnx")
     assert settings.piper_speed == 0.95
     assert settings.piper_volume == 1.0
+    assert settings.piper_noise_scale == 0.667
+    assert settings.piper_noise_w == 0.8
+    assert settings.piper_use_cuda is False
     assert settings.log_level == "INFO"
 
 
@@ -51,6 +54,23 @@ def test_invalid_volume_is_rejected() -> None:
 def test_invalid_temperature_is_rejected() -> None:
     with pytest.raises(ConfigError, match="OLLAMA_TEMPERATURE"):
         load_settings({**BASE_ENV, "OLLAMA_TEMPERATURE": "3"})
+
+
+def test_invalid_noise_scale_is_rejected() -> None:
+    with pytest.raises(ConfigError, match="PIPER_NOISE_SCALE"):
+        load_settings({**BASE_ENV, "PIPER_NOISE_SCALE": "2"})
+
+
+def test_invalid_boolean_is_rejected() -> None:
+    with pytest.raises(ConfigError, match="PIPER_USE_CUDA"):
+        load_settings({**BASE_ENV, "PIPER_USE_CUDA": "maybe"})
+
+
+def test_boolean_accepts_common_spellings() -> None:
+    for value in ("1", "true", "YES", "on"):
+        assert load_settings({**BASE_ENV, "PIPER_USE_CUDA": value}).piper_use_cuda is True
+    for value in ("0", "false", "NO", "off"):
+        assert load_settings({**BASE_ENV, "PIPER_USE_CUDA": value}).piper_use_cuda is False
 
 
 def test_empty_language_means_auto_detect() -> None:

@@ -104,6 +104,9 @@ Copy `.env.example` to `.env.local` and adjust as needed. `.env.local` is ignore
 | `PIPER_MODEL_PATH` | `models/en_GB-alan-medium.onnx` | Voice model path |
 | `PIPER_SPEED` | `0.95` | 1.0 = natural, lower = slower |
 | `PIPER_VOLUME` | `1.0` | 0.0–1.0 |
+| `PIPER_NOISE_SCALE` | `0.667` | Voice variation; lower is steadier |
+| `PIPER_NOISE_W` | `0.8` | Phoneme-duration variation |
+| `PIPER_USE_CUDA` | `false` | GPU inference (`onnxruntime-gpu` required) |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL` |
 
 ## The JARVIS voice
