@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
@@ -39,7 +40,6 @@ class WhisperOptions:
     device: str
     compute_type: str
     model_cache_directory: str | None = None
-    warmup_audio: str | None = None
     beam_size: int = 1
 
 
@@ -102,7 +102,6 @@ class WhisperSTT(stt.STT):
             device=device,
             compute_type=compute_type,
             model_cache_directory=model_cache_directory,
-            warmup_audio=warmup_audio,
         )
         self._lock = threading.Lock()
         self._model = self._load_model()
@@ -113,8 +112,6 @@ class WhisperSTT(stt.STT):
     def _load_model(self) -> WhisperModel:
         cache_dir = self._opts.model_cache_directory
         if cache_dir:
-            import os
-
             os.makedirs(cache_dir, exist_ok=True)
 
         logger.info(
@@ -202,9 +199,3 @@ class WhisperSTT(stt.STT):
                 self._opts.language = language
             if reinitialize:
                 self._model = self._load_model()
-
-    def _sanitize_options(self, *, language: str | None = None) -> WhisperOptions:
-        options = replace(self._opts)
-        if language is not None:
-            options.language = language
-        return options
